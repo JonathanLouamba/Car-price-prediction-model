@@ -1,0 +1,1016 @@
+---
+title: "MiniProjet"
+output:
+  html_notebook: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+author : Mlamali SAID SALIMO, Mathieu CISSE, Jonathan LOUAMBA
+
+---
+
+```{r}
+# load all packages 
+library(writexl)
+library(ggplot2)
+library(prettyR)
+library(tidyr)
+library(corrplot)
+library(MASS)
+library(leaps)
+library(Matrix)
+library(glmnet)
+library(lmridge)
+library(lmtest)
+library(caret)
+```
+# 📦 Le jeu de données
+## import et pre process
+```{r}
+data_cars = read.csv2("data/CarPrice_Assignment.csv",sep = ",",header = T, dec=".")
+data_cars
+```
+```{r}
+# sélection des colonnes numériques et lavage
+myvars = c("wheelbase","carlength","carwidth","carheight","curbweight","enginesize","boreratio","stroke","compressionratio","horsepower","peakrpm", "citympg",	"highwaympg",	"price")
+
+data_cars = data_cars[myvars]
+
+data_cars # jeu de données initial
+```
+```{r}
+# exporte to excel file
+write_xlsx(data_cars,"data_cars initial.xlsx")
+```
+
+## 📈 Visualisation du jeu de données
+
+Avant de se lancer dans la construction d'un modèle, il est indispensable de __visualiser les données__. Cela permet d'avoir une idée des __relations entres les variables__ et de voir s'il ya des valeurs particulière (points abérrant).
+
+```{r}
+names(data_cars)
+```
+```{r}
+print(dim(data_cars))
+```
+```{r}
+n = nrow(data_cars)
+p = ncol(data_cars) - 1
+print(c(n,p))
+```
+```{r}
+str(data_cars)
+```
+
+```{r}
+describe(data_cars,num.desc = c("mean","median","sd","min","max","valid.n"))
+```
+
+```{r}
+hist(data_cars$price,xlab="prices ($)",ylab="count",breaks=25)
+```
+```{r}
+ggplot(data=data_cars, aes(data_cars$price)) +
+  geom_histogram(aes(y =..density..), fill = "orange") +
+  geom_density()
+```
+
+```{r}
+ggplot(gather(gather(data_cars)), aes(value)) + 
+    geom_histogram(color = "white",bins=25) + 
+    facet_wrap(~key, scales = "free")
+```
+
+```{r}
+plot(data_cars$horsepower,data_cars$price,pch=18,col="blue", ylab = "Prix de la voiture")
+```
+
+```{r}
+plot(data_cars$horsepower,data_cars$price,pch=18,col="blue", ylab = "Prix de la voiture")
+abline( lm(price~horsepower,data=data_cars),lwd=2, col="yellow")
+```
+
+```{r}
+pairs(data_cars[,10:ncol(data_cars)],col="red")
+```
+```{r}
+corrplot(cor(data_cars), method = 'square', type = 'lower', diag = FALSE)
+```
+```{r}
+plot(data_cars$citympg,data_cars$highwaympg,pch=18,col="blue")
+```
+```{r}
+plot(data_cars$horsepower,data_cars$highwaympg,pch=18,col="red")
+```
+
+# PARTIE 1 ---
+## ⚙ (A) Analyse du modèle
+### ◼ Décrire votre modèle linéaire
+
+ `modele_0` est notre modèle inital : crée à partir de toutes les variables $X_j$ et du dataset initial `data_cars`
+
+```{r}
+modele_0 = lm(price ~., data = data_cars)
+summary(modele_0)
+```
+```{r}
+modele_0$coefficients
+```
+
+### ◼ La qualité de l'ajustement
+
+La valeur du coefficient de détermination $R²$ de la régression : `Multiple R-squared` = $0.851$. Ce qui veut dire que le prix des voiture est expliqué a $85.1$% par notre premier modèle globale.
+
+_Remarque : c'est bien_
+
+### ◼ Vérification des hypothèses
+```{r}
+mean(modele_0$residuals)
+```
+
+
+_Remarque : espérances des résidues est nulle du point de vue empirique._
+
+```{r}
+hist(modele_0$residuals)
+```
+_Remarque :  on peut considérer visuellement, graphiquement que les résidus suiventbien une loi normale._
+```{r}
+plot(data_cars$price,modele_0$residuals,xlab="Prix",ylab="Résidu")
+abline(h=0, col="blue") 
+```
+_Remarque : Pas de forme particulière, les résidus sont assez uniforme sur l'axe 0. Graphiquement on peut conclure et dire que les hypothèses sont vérifié. De plus on peut déjà constater la présence de quelques points atypiques_
+
+---
+
+```{r}
+plot(modele_0)
+```
+
+```{r}
+dwtest(modele_0)
+```
+
+
+### ◼ Détection des valeurs atypiques
+
+- __Calcul du Seuil critique__
+
+```{r}
+residus.student = rstudent(modele_0)
+```
+
+```{r}
+alpha = 0.1 # on pose un risque alpha de 10%
+# calcul du seuil à partir de la loi de Student à (n-p-2) ddl
+seuil.student = qt(1-alpha/2,n-p-2)
+seuil.student  
+```
+**🔎 détection des valeurs atypiques au sens de ce seuil :**
+
+```{r}
+atypiques.rstudent = (residus.student < -seuil.student | residus.student > +seuil.student)
+ab.student = data_cars[atypiques.rstudent, ]
+ab.student # points atypiques/abérrants
+```
+```{r}
+plot(data_cars$price,residus.student,xlab="Prix",ylab="Résidu studentisées")
+abline(h=0)
+abline(h=-seuil.student,col="green")
+abline(h=+seuil.student,col="green") 
+text(ab.student$price,residus.student[atypiques.rstudent],labels=rownames(ab.student), cex= 0.75,pos=2, col = "green") #affiche les point aberrant
+```
+```{r}
+rownames(ab.student)
+```
+
+_Remarque : Les points 9,15 blabla sont des points abérrantes_
+
+- __Calcul du Levier__
+
+```{r}
+# calculez le levier de chaque observation
+indicateurs <- influence.measures(modele_0) #Levier
+indicateurs
+```
+```{r}
+attributes(indicateurs)
+```
+```{r}
+residus.hat = indicateurs$infmat[,"hat"] #on récupère la colonne "hat" qui coreespond au levier # c'est la diagonale 
+```
+
+**🔎 détection des valeurs atypiques au sens du levier :**
+
+```{r}
+# le seuil est défini par 2(p+1)/n.
+seuil.hat = 2*(p+1)/n
+seuil.hat
+```
+
+```{r}
+atypiques.levier = (residus.hat > seuil.hat)
+ab.hat = data_cars[atypiques.levier,]
+ab.hat # points atypiques/abérrants
+```
+```{r}
+plot(data_cars$price,residus.hat,xlab="Prix",ylab="Levier h_ii")
+abline(h=+seuil.hat,col="green") 
+text(ab.hat$price,residus.hat[atypiques.levier],labels=rownames(ab.hat), cex= 0.75,pos=3, col = "green") #affiche les point aberrant
+```
+```{r}
+rownames(ab.hat)
+```
+
+Les points 31, 156 ect ect ect non pas été détectés par le test de student (?????? on appelle ça comme ca ?) 
+
+- __Suppression des valeurs abérrantes__
+
+```{r}
+print(nrow(ab.hat))
+print(nrow(ab.student))
+```
+```{r}
+union(rownames(ab.hat), rownames(ab.student))
+```
+
+```{r}
+idx = intersect( rownames(ab.hat), rownames(ab.student) )
+idx 
+```
+```{r}
+data_cars[idx ,]
+```
+
+```{r}
+setdiff(rownames(data_cars), idx)
+```
+
+```{r}
+data_cars = data_cars[setdiff(rownames(data_cars), idx) ,]
+data_cars # nouveau jeu d'apprentissage sans les valeurs abérrantes
+```
+```{r}
+# exporte to excel file
+write_xlsx(data_cars,"data_cars.xlsx")
+```
+
+---
+
+`modele` est notre nouveau modèle : crée à partir de toutes les variables $X_j$ et du dataset sans les points atypiques `data_cars`
+
+```{r}
+modele = lm(price ~., data = data_cars)
+summary(modele)
+```
+
+
+## ⚙ (B) Étude de la significativité de chaque variable dans votre modèle.
+
+```{r}
+summary(modele)
+```
+
+Pour étudier la significativité individuelle de chaque variable, on utilise la statistique de Student. Comme la p-valeurrelative au test de Student pour la nullité d'un coefficient âj est plus grande que 0.005 pour plusieurs variables, on peut remarqur que beacoup de variables explicatives
+
+A droite, le test de student nous indique que parmi toutes les variables explicatives, pour $\alpha = 5$%, seulement ''citer les variables'' vont voir leurs valeur de probabilités critiques inférieur à 0.5 (et donc on rejète l'hypothèse $H_0$). Ainsi, ces var influent significativement sur le prix. 
+
+
+## ⚙ (C) Étudier la significativité globale du modèle.
+
+```{r}
+summary(modele)
+```
+On utilise le test de Fisher pour étudier la significativité globale. En effet, on regarde `F-statistic` pour valider le modèle defaçon globale. 
+
+`p-value` < 2.2 e-16 < 5% donc on rejète H_0 (a1=a2=a3 =... = 0)
+
+La p-valeur < 0.005 donc l'utilisation du modèle linéaire multiple est pertinente. Les variables sont globalement ignificatives
+
+$f_{15,186,0.95} =$
+
+## ⚙ (D)
+### ◼ Etude de l'éventuelle colinéarité entre les variables du modèle 
+
+Heatmap to better understand correlation
+
+```{r}
+M_cor_squared = cor(data_cars)^2
+corrplot(M_cor_squared, method = 'square', type = 'lower', diag = FALSE)
+```
+
+
+```{r}
+R_carre = summary(modele)$r.squared
+R_carre
+```
+
+```{r}
+rownames(M_cor_squared)
+```
+
+```{r}
+listes_var = rownames(M_cor_squared)
+for (i in 1:ncol(M_cor_squared)) {
+  for (j in 1:ncol(M_cor_squared)) {
+    
+    if(M_cor_squared[i,j] > R_carre  && i != j) {
+      print(c(listes_var[i],listes_var[j],M_cor_squared[i,j]))
+    }
+  }
+}
+```
+_Remarque : on peut déjà soupconner les var 'citympg' et 'highwaympg' d'être colinéaire_
+
+### ◼ Sélection de variables (en précisant les critères utilisés)
+
+Trier les coefficients selon les valeurs de p-value
+```{r}
+pValues = summary(modele)$coef[,4]
+sort(pValues)
+```
+_Remarque : enginesize est le plus petit p-value, il est + significatif par rapport à curbweight carlength ... _
+
+---
+
+Pour pouvoir choisir un sous-ensemble nous allons appliquer plusieurs types de __méthode de stepwise__.
+
+Pour utiliser la commande `step` on doit spécifier le modèle de départ `m0` et le modèle maximal `mf` qui peut être le modèle complet.
+
+```{r}
+m0 = lm(price~1,data=data_cars)  # choix du modèle avec constante seulement
+mf = modele
+```
+
+---
+
+#### La sélection __ascendante__ utilisant le critère AIC
+
+```{r}
+modele_step_forward = step(m0, scope=list(lower=m0, upper=mf),data=data_cars, direction="forward")
+plot(0:(nrow(modele_step_forward$anova)-1),modele_step_forward$anova[,"AIC"],type="b",xlab="# de var. introduites",ylab="AIC",main="Sélection forward (AIC)")
+```
+```{r}
+summary(modele_step_forward)
+```
+
+--- 
+
+#### La sélection __descendante__ utilisant le critère AIC
+
+
+```{r}
+modele_step_backward = step(mf,data=data_cars,direction="backward")
+plot(0:(nrow(modele_step_backward$anova)-1),modele_step_backward$anova[,"AIC"],type="b",xlab="# de var. exclus",ylab="AIC",main="Sélection backward (AIC)")
+```
+
+```{r}
+summary(modele_step_backward)
+```
+
+---
+
+#### La sélection ascendante avec le  __F−test__.
+
+
+```{r}
+modele_step_forward_Ftest = step(m0, scope=list(lower=m0, upper=mf),data=data_cars, direction="forward",test="F")
+plot(0:(nrow(modele_step_forward_Ftest$anova)-1),modele_step_forward_Ftest$anova[,"AIC"],type="b",xlab="# de var. introduites",ylab="AIC",main="Sélection forward (F-test) ")
+```
+
+```{r}
+summary(modele_step_forward_Ftest)
+```
+
+---
+
+#### La sélection descendante avec le __F−test__.
+```{r}
+modele_step_backward_Ftest = step(mf,data=data_cars,direction="backward",test="F")
+plot(0:(nrow(modele_step_backward_Ftest$anova)-1),modele_step_backward_Ftest$anova[,"AIC"],type="b",xlab="# de var. introduites",ylab="AIC",main="Sélection backward (F-test) ")
+
+```
+
+```{r}
+summary(modele_step_backward_Ftest)
+```
+
+---
+
+```{r}
+print(formula(modele_step_backward))
+print(formula(modele_step_backward_Ftest))
+```
+```{r}
+print(formula(modele_step_forward))
+print(formula(modele_step_forward_Ftest))
+```
+
+_Remarque : Pour une même méthode (acsendante ou descendante), on voit que les variables sélectionné sont les mêmes,  avec ou sans le critère de Fisher. De plus, on remarque que pour une même méthode, sur le graphique AIC de la methode avec le F-Test et celle sans, sont équivalent : il se passe la même chose, c'est la même chose.
+
+Les deux modèles sont équivalents.
+
+Nous qui pensions obtenir 4 modèle différents, on en obtiens seulement 2.
+Donc pour la suite, on ne s'interresse seulement qu'à `modele_step_forward` et `modele_step_backward`. 
+_
+
+---
+
+
+## ⚙ (E) Validation croisée
+
+### ◼ La procédure Hold Out
+
+#### Split : Train - Test 
+
+```{r}
+set.seed(123) #pour garder le même découpage
+
+n = nrow(data_cars)
+c=runif(n)
+rang=rank(c) #associer à chaque individu un numéro de rang dans c
+
+train_size = (3*n)%/%4 # taille de l'ensemble d'apprentissage en arrondi
+train_index = rang[1:train_size] #définir les individus de l'ensemble d'apprentissage
+train_size
+```
+
+```{r}
+train.data = data_cars[train_index,] # train set
+train.data
+```
+
+```{r}
+test.data = data_cars[-train_index,] # test set 
+test.data
+```
+
+```{r}
+# exporte to excel file
+write_xlsx(train.data,"train.data.xlsx")
+write_xlsx(test.data,"test.data.xlsx")
+```
+
+
+#### • **mf**
+##### Apprentissage
+
+```{r}
+mf_trained = lm(formula = formula(mf), data = train.data)
+summary(mf_trained)
+```
+
+```{r}
+predictions_train = predict(mf_trained,newdata=train.data)
+predictions_train
+```
+
+```{r}
+sum((train.data$price - predictions_train)^2)
+```
+```{r}
+sum(train.data$price^2)
+```
+##### Evaluation 
+```{r}
+predictions_test = predict(mf_trained,newdata=test.data)
+predictions_test
+```
+
+```{r}
+eval_err_mf = mean((test.data$price - predictions_test)^2) # Estimation de l'erreur théorique
+eval_err_mf 
+```
+
+#### • **m0**
+##### Apprentissage
+```{r}
+m0_trained = lm(formula = formula(m0), data = train.data)
+summary(m0_trained)
+```
+
+```{r}
+predictions_train = predict(m0_trained,newdata=train.data)
+predictions_train
+```
+
+```{r}
+sum((train.data$price - predictions_train)^2)
+```
+
+##### Evaluation 
+```{r}
+predictions_test = predict(m0_trained,newdata=test.data)
+predictions_test
+```
+
+```{r}
+eval_err_m0 = mean((test.data$price - predictions_test)^2) # Estimation de l'erreur théorique
+eval_err_m0
+```
+
+
+
+#### • **modele_step_forward**
+##### Apprentissage
+```{r}
+modele_step_forward_trained = lm(formula = formula(modele_step_forward), data = train.data)
+summary(modele_step_forward_trained)
+```
+
+```{r}
+predictions_train = predict(modele_step_forward_trained,newdata=train.data)
+predictions_train
+```
+
+```{r}
+sum((train.data$price - predictions_train)^2)
+```
+
+##### Evaluation 
+```{r}
+predictions_test = predict(modele_step_forward_trained,newdata=test.data)
+predictions_test
+```
+
+```{r}
+eval_err_modele_step_forward = mean((test.data$price - predictions_test)^2) # Estimation de l'erreur théorique
+eval_err_modele_step_forward
+```
+
+
+#### • **modele_step_backward**
+##### Apprentissage
+```{r}
+modele_step_backward_trained = lm(formula = formula(modele_step_backward), data = train.data)
+summary(modele_step_backward_trained)
+```
+
+```{r}
+predictions_train = predict(modele_step_backward_trained,newdata=train.data)
+predictions_train
+```
+
+```{r}
+sum((train.data$price - predictions_train)^2)
+```
+
+##### Evaluation 
+```{r}
+predictions_test = predict(modele_step_backward_trained,newdata=test.data)
+predictions_test
+```
+
+```{r}
+eval_err_modele_step_backward = mean((test.data$price - predictions_test)^2) # Estimation de l'erreur théorique
+eval_err_modele_step_backward
+```
+
+#### Hold out - Conclusion :
+
+
+```{r}
+print(eval_err_mf)
+print(eval_err_m0)
+print(eval_err_modele_step_forward)
+print(eval_err_modele_step_backward)
+```
+
+**--> On préfère le `modele-step_backward` c'est le plus mieux.**
+
+---
+
+
+```{r}
+formula(modele_step_backward)
+```
+
+```{r}
+summary(modele_step_backward)
+```
+
+
+### ◼ La procédure K-Fold
+Nous   devons   nous   tourner   vers   les   techniques   de   ré-échantillonnage lorsqu’il n’est pas possible de réserver une partie des données pour l’évaluation des modèles. 
+
+Schématiquement, la validation consiste à subdiviser aléatoirement les données en $K$ blocs. Nous réitérons le processus suivant, en faisant tourner les sous-échantillons : apprentissage du modèle sur les $(K-1)$ blocs, évaluation du taux d’erreur en prédiction sur le $K^{ème}$ bloc. Le taux d’erreur en validation  croisée  est la moyenne  des taux d’erreurs ainsi collectés.  C’est un estimateur  de meilleure qualité que le taux d’erreur en resubstitution.
+
+A partir de ce descriptif, nous retranscrivons les opérations dans R. Tout d’abord, nous allons **créer «aléatoirement» une colonne indiquant l’appartenance des individus aux blocs.**
+
+```{r}
+n = nrow(data_cars)
+n
+```
+
+```{r}
+K = 5 # pour 5-validation croisée
+taille = n%/%K #determiner taille de chaque block
+taille 
+```
+
+```{r}
+set.seed(123) #pour garder le même découpage
+
+calea=runif(n) # générer une colonne de valeurs aléatoires
+rang=rank(calea) #associer à chaque individu un numéro de rang dans calea
+
+bloc = (rang-1)%/%taille + 1 #associer à chaque individu un numéro de bloc
+bloc = as.factor(bloc)
+summary(bloc)
+```
+L’idée est de créer une colonne de valeurs aléatoires, de la transformer en rang associé à chaque individu. Nous en déduisons le numéro de bloc. La dernière instruction est destinée à vérifier queles effectifs sont identiques dans les blocs. Ce qui est le cas.
+
+Nous pouvons maintenant **réitérer la séquence «apprentissage – test»**. Nous le réalisons à l’aide d‘une boucle. A chaque modèle construit, nous évaluons le taux d’erreur sur le $k^{ème}$  bloc. Nous collectons les taux d’erreur dans le vecteur `all.err`.
+
+```{r}
+# fct pour lancer la validation croisée
+evaluator_cross_validation = function(formula,data) {
+  all.err = numeric(0)
+  
+  for (k in 1:K) {
+    data.train = data[bloc!=k,]
+    data.test = data[bloc==k,]
+    #apprendre le modele sur tous les individus sauf le bloc k
+    mdl = lm(formula, data = data.train)
+    # appliquer le modèle sur le bloc k
+    pred = predict(mdl,newdata = data.test)
+    # calcul des résidus
+    residu_carre = mean((pred - data.test$price)^2)
+    # conserver
+    all.err = rbind(all.err,residu_carre)
+  }
+  
+  return(all.err)
+}
+
+```
+
+--- 
+
+On va comparer les modèles :
+
+- `m0` : ...
+
+- `mf` : ...
+
+- `modele_step_forward` : ...
+
+- `modele_step_backward` : ...
+
+```{r}
+err_modeles = numeric(0) #initialiser le tab où l'on conservera les err de chaque modeles après validation croisée
+```
+
+
+---
+
+#### • m0
+```{r}
+print(formula(m0))
+```
+
+Nous obtenons la liste :
+```{r}
+
+all.err.m0 = evaluator_cross_validation(formula = formula(m0), data = data_cars)
+all.err.m0
+```
+Puisque nous avons exactement le même nombre d’observations dans chaque bloc, nous pouvons calculer directement la moyenne non pondérée pour obtenir l’erreur en validation croisée.
+
+```{r}
+err_modeles = rbind(err_modeles,mean(all.err.m0)) # converser
+mean(all.err.m0)
+```
+
+Le résidu (taux d’erreur) en validation croisée du modèle `m0` sur le jeu de donnée `data_cars` est de $64\:126\:916$.
+
+... On fait de même pour les 3 autres modèles
+
+---
+
+#### • mf
+```{r}
+print(formula(mf))
+all.err.mf = evaluator_cross_validation(formula = formula(mf), data = data_cars)
+all.err.mf
+```
+```{r}
+err_modeles = rbind(err_modeles,mean(all.err.mf)) # converser
+mean(all.err.mf)
+```
+
+**Le résidu (taux d’erreur) en validation croisée du modèle `mf` sur le jeu de donnée `data_cars` est de $10\:639\:283$.**
+
+---
+
+#### • modele_step_forward
+```{r}
+print(formula(modele_step_forward))
+all.err.modele_step_forward = evaluator_cross_validation(formula = formula(modele_step_forward), data = data_cars)
+all.err.modele_step_forward
+```
+```{r}
+err_modeles = rbind(err_modeles,mean(all.err.modele_step_forward)) # converser
+mean(all.err.modele_step_forward)
+```
+
+**Le résidu (taux d’erreur) en validation croisée du modèle `modele_step_forward` sur le jeu de donnée `data_cars` est de $10\:003\:565$.**
+
+---
+
+#### • modele_step_backward
+```{r}
+print(formula(modele_step_backward))
+all.err.modele_step_backward = evaluator_cross_validation(formula = formula(modele_step_backward), data = data_cars)
+all.err.modele_step_backward
+```
+```{r}
+err_modeles = rbind(err_modeles,mean(all.err.modele_step_backward)) # converser
+mean(all.err.modele_step_backward)
+```
+
+**Le résidu (taux d’erreur) en validation croisée du modèle `modele_step_backward` sur le jeu de donnée `data_cars` est de $10\:095\:923$.**
+
+---
+
+#### K-Fold - Conclusion :
+
+```{r}
+rownames(err_modeles) <- c('m0', 'mf', 'modele_forward','modele_backward')
+err_modeles
+```
+
+**--> On choisit `modele-step_forward`.**
+
+---
+
+```{r}
+formula(modele_step_forward)
+```
+
+```{r}
+summary(modele_step_forward)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# PARTIE 2 ---
+
+[regularized_regression.pdf page 13](https://eric.univ-lyon2.fr/~ricco/cours/slides/regularized_regression.pdf)
+On parle de «shrinkage» (rétrécissement) : on rétrécit les plages de valeurs que peuvent prendre les paramètres estimés.•﻿Les variables xjdoivent être centrées et réduites (zj) pour éviter que les variables à forte variance aient trop d’influence•﻿La variable cible ydoit être centrée pour évacuer la constante de la ﻿régression (qui ne doit pas être pénalisée), la cible ypeut être ﻿éventuellement réduite aussi : nous travaillerons alors sur les paramètres βj•(→0) βj→0 : les variances des coefficients estimés sont nulles•(→+) βRidge= βMCO훽22=෍푗=1푝훽푗2
+wewe on doit centrée
+
+## 📦 centrée reduit 
+
+```{r}
+data_cars_tilte = as.data.frame(scale(data_cars))
+data_cars_tilte
+```
+```{r}
+describe(data_cars_tilte)
+```
+
+```{r}
+train.data_tilte = as.data.frame(scale(train.data))
+train.data_tilte
+```
+```{r}
+describe(train.data_tilte)
+```
+```{r}
+test.data_tilte = as.data.frame(scale(test.data))
+test.data_tilte
+```
+```{r}
+describe(test.data_tilte)
+```
+## ⚙ (A) régularisation Ridge
+### ◼ lambda= 2.89107680
+
+```{r}
+lambda_LW = 2.89107680
+mf.ridgeLW_trained=lmridge(price~.,data=train.data_tilte,K=lambda_LW)
+summary(mf.ridgeLW_trained)
+```
+
+```{r}
+predictions_test_tilte = predict(mf.ridgeLW_trained,test.data_tilte)
+predictions_test=predictions_test_tilte*sd(test.data$price)+mean(test.data$price)
+predictions_test
+```
+```{r}
+test.data$price
+```
+
+```{r}
+sum((test.data$price - predictions_test)^2)
+```
+
+### ◼ lambda=4.79446387
+
+```{r}
+lambda_HBK = 4.79446387
+mf.ridgeHBK_trained=lmridge(price~.,data=train.data_tilte,K=lambda_HBK)
+summary(mf.ridgeHBK_trained)
+```
+
+```{r}
+predictions_test_tilte = predict(mf.ridgeHBK_trained,test.data_tilte)
+predictions_test=predictions_test_tilte*sd(test.data$price)+mean(test.data$price)
+predictions_test
+```
+```{r}
+sum((test.data$price - predictions_test)^2)
+```
+### ◼ meilleur lambda
+
+```{r}
+n = nrow(data_cars_tilte)
+n
+```
+
+```{r}
+K = 5 # pour 5-validation croisée
+taille = n%/%K #determiner taille de chaque block
+taille 
+```
+
+```{r}
+set.seed(123) #pour garder le même découpage
+
+calea=runif(n) # générer une colonne de valeurs aléatoires
+rang=rank(calea) #associer à chaque individu un numéro de rang dans calea
+
+bloc = (rang-1)%/%taille + 1 #associer à chaque individu un numéro de bloc
+bloc = as.factor(bloc)
+summary(bloc)
+```
+```{r}
+lambda_to_try = seq(0.0001,1,0.0005)
+print(head(lambda_to_try))
+n_lambda_to_try = length(lambda_to_try)
+print(n_lambda_to_try)
+```
+```{r}
+#la 1ere colonne pour les numéros d'individus
+#la 2nde colonne pour les erreurs de prévision par la m"thode Fold
+MFOLD = matrix(lambda_to_try,n_lambda_to_try,2) 
+```
+
+```{r}
+# matrice à n lignes et 2 colonnes, la 1ère  colonne pour les numéros d' individus, la 2nde colonne pour les erreurs de prévision en  enlevant l'ième  observation.
+Err_prevF = matrix(1:K,K,2)
+```
+```{r}
+# initialiser le vecteur des erreurs avec un vecteur nul de taille égale à n
+erreurF=rep(0,K)
+erreurF
+```
+```{r}
+for (j in 1:n_lambda_to_try){
+  for (i in 1:K){
+    #modele lineaire ridge sans le groupe i
+    rid = lmridge(price~.,data_cars_tilte[bloc!=i,],K=lambda_to_try[j])
+    
+    #prévision de la ieme oservation à l'aide du modele obtenu
+    pred=predict(rid,newdata=data_cars_tilte[bloc==i,])
+    
+    #erreur de prévision moyenne du groupei
+    erreurF[i] = mean((pred-data_cars_tilte[bloc==i,]$price)^2)
+    Err_prevF[i,2] = erreurF[i]
+  }
+  MFOLD[j,2]=mean(Err_prevF[,2])
+}
+
+```
+
+on obtiens cette courbe
+```{r}
+plot(MFOLD,type="l",col=2,xlab="Valeurs de lambda à tester",ylab="Moyenne Erreur de validation croisée 5-FOLD",sub="Evolution de l'erreur moyenne de la validation croisée selon les valeurs de lambda ",col.sub="blue")
+```
+On remarque que pour une haute valeur de lambda, l'erreur augmente. La meilleur valeur qui minimise l'erreur est :
+
+```{r}
+Lambda_optF=MFOLD[which.min(MFOLD[,2]),1]
+Lambda_optF
+```
+ainsi blabla
+```{r}
+mf.ridge_Lambda_optF_trained =lmridge(price~.,train.data_tilte,K=Lambda_optF) 
+summary(mf.ridge_Lambda_optF_trained)
+```
+```{r}
+predictions_test_tilte = predict(mf.ridge_Lambda_optF_trained,test.data_tilte)
+predictions_test = predictions_test_tilte*sd(test.data$price)+mean(test.data$price)
+predictions_test
+```
+```{r}
+sum((test.data$price - predictions_test)^2)
+```
+
+
+
+## ⚙ (B) régularisation LASSO
+
+### ◼ Load the Data
+
+To perform lasso regression, we’ll use functions from the glmnet package. This package requires the response variable to be a vector and the set of predictor variables to be of the class data.matrix.
+
+```{r}
+y <- data_cars_tilte$price
+x <- data.matrix( data_cars_tilte[,1:(ncol( data_cars_tilte)-1)])
+```
+
+```{r}
+y_train <- train.data_tilte$price
+length(y_train)
+```
+```{r}
+y_test <- test.data_tilte$price
+length(y_test)
+```
+```{r}
+x_train = data.matrix( train.data_tilte[,1:(ncol( train.data_tilte)-1)])
+dim(x_train)
+```
+
+
+```{r}
+x_test = data.matrix( test.data_tilte[,1:(ncol(test.data_tilte)-1)])
+dim(x_test)
+```
+### ◼ Ajuster le modèle de régression Lasso : quel est le lambda optimal ?
+
+Next, we’ll use the glmnet() function to fit the lasso regression model and specify alpha=1.
+
+Note that setting alpha equal to 0 is equivalent to using ridge regression and setting alpha to some value between 0 and 1 is equivalent to using an elastic net. 
+
+To determine what value to use for lambda, we’ll perform k-fold cross-validation and identify the lambda value that produces the lowest test mean squared error (MSE).
+
+Note that the function cv.glmnet() automatically performs k-fold cross validation using k = 10 folds.
+```{r}
+#perform k-fold cross-validation to find optimal lambda value
+cv_model <- cv.glmnet(x, y, alpha = 1,nfolds=5)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_lasso <- cv_model$lambda.min
+best_lambda_lasso
+```
+The lambda value that minimizes the test MSE turns out to be $0.007427016$.
+
+```{r}
+#produce plot of test MSE by lambda value
+plot(cv_model) 
+```
+
+### ◼ Analyze Final Model
+
+Lastly, we can analyze the final model produced by the optimal lambda value.
+
+We can use the following code to obtain the coefficient estimates for this model:
+```{r}
+#find coefficients of best model
+best_model_lasso <- glmnet(x, y, alpha = 1, lambda = best_lambda_lasso)
+coef(best_model_lasso)
+```
+```{r}
+summary(best_model_lasso)
+```
+
+
+## BONus perso ◼ meilleur lambda RIDGE : glmnet
+```{r}
+#perform k-fold cross-validation to find optimal lambda value
+cv_model <- cv.glmnet(x, y, alpha = 0,nfolds=5)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_ridge <- cv_model$lambda.min
+best_lambda_ridge
+```
+
+```{r}
+#produce plot of test MSE by lambda value
+plot(cv_model) 
+```
+```{r}
+#find coefficients of best model
+best_model <- glmnet(x, y, alpha = 0, lambda = best_lambda_ridge)
+coef(best_model)
+```
+```{r}
+mf.ridge_Lambda_optF_trained
+```
+
